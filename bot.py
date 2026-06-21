@@ -24,11 +24,11 @@ EMAIL_SMTP_SERVER = os.environ.get("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
 EMAIL_RECIPIENT = os.environ.get("EMAIL_RECIPIENT") or EMAIL_ADDRESS
 
-
 XOF_RATE = 655.957
 
 
 def _fetch_rates() -> tuple[float, float]:
+    """Fetch USD->EUR rate from Frankfurter API and derive USD->XOF."""
     r = requests.get(f"{BASE_URL}/latest?from=USD&to=EUR", timeout=10)
     r.raise_for_status()
     eur = r.json()["rates"]["EUR"]
@@ -37,10 +37,12 @@ def _fetch_rates() -> tuple[float, float]:
 
 
 async def get_rates() -> tuple[float, float]:
+    """Thread-safe wrapper for _fetch_rates to avoid blocking the event loop."""
     return await asyncio.to_thread(_fetch_rates)
 
 
 def _send_email_sync(subject: str, body: str) -> None:
+    """Synchronous email send via SMTP with STARTTLS."""
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
@@ -52,6 +54,7 @@ def _send_email_sync(subject: str, body: str) -> None:
 
 
 async def send_email(subject: str, body: str) -> None:
+    """Send an email asynchronously via a thread executor."""
     if not all([EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_RECIPIENT]):
         logging.warning("Email not configured. Set EMAIL_ADDRESS, EMAIL_PASSWORD, and EMAIL_RECIPIENT.")
         return
@@ -59,10 +62,12 @@ async def send_email(subject: str, body: str) -> None:
 
 
 def format_number(n: float) -> str:
+    """Format a float with 2 decimals and space as the thousands separator."""
     return format(n, ",.2f").replace(",", " ")
 
 
 async def rate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /rate — display current USD->EUR and USD->XOF rates."""
     try:
         eur, xof = await get_rates()
         await update.message.reply_text(f"USD = {eur} EUR = {xof} XOF")
@@ -71,6 +76,7 @@ async def rate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def amount_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /amount — convert a dollar/euro amount to the other two currencies."""
     if len(context.args) != 2:
         await update.message.reply_text("Usage: /amount <amount> <currency>\nExample: /amount 20 dollar")
         return
@@ -111,6 +117,7 @@ async def amount_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /alert — store a USD->EUR threshold for email notification."""
     if not context.args:
         await update.message.reply_text("Usage: /alert <threshold>\nExample: /alert 0.90")
         return
@@ -129,6 +136,7 @@ async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def urgent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /urgent — one-shot threshold check with immediate email."""
     if not context.args:
         await update.message.reply_text("Usage: /urgent <threshold>\nExample: /urgent 0.80")
         return
@@ -162,6 +170,7 @@ async def urgent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def check_rates(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: check all thresholds and send email if rate exceeds any."""
     thresholds = context.bot_data.get("thresholds", {})
     if not thresholds:
         return
@@ -185,6 +194,7 @@ async def check_rates(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def main() -> None:
+    """Build and run the Telegram bot application."""
     app = ApplicationBuilder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
 
     app.add_handler(CommandHandler("rate", rate_command))
